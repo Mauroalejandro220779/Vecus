@@ -14,7 +14,7 @@ library(knitr)
 library(writexl)
 ```
 
-## 1. Leer y explorar los datos de pérdida de bosque y ecosistemas acuáticos
+## 1. Leer y explorar los datos de pérdida de bosque y ecosistemas acuáticos CAMBIO DE PRUEBA
 
 ```{r}
 excel_path <- "C:/2025/Socrates Data/geovisoramazonia/TMAPB.xlsx"
