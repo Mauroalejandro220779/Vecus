@@ -1,0 +1,158 @@
+
+---
+title: "Estimación de pérdida económica por departamento"
+author: "Mauro Reyes"
+date: "2025-07-25"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(readr)
+library(readxl)
+library(knitr)
+library(writexl)
+```
+
+## 1. Leer y explorar los datos de pérdida de bosque y ecosistemas acuáticos
+
+```{r}
+excel_path <- "C:/2025/Socrates Data/geovisoramazonia/TMAPB.xlsx"
+datos <- read_excel(excel_path)
+
+names(datos)
+head(datos)
+```
+
+## 2. Definir valores económicos por hectárea (COP)
+
+```{r}
+valor_ha_cop_bosque <- 9618563
+valor_ha_cop_acuatico <- 68962
+```
+
+## 3. Calcular pérdidas económicas por departamento
+
+```{r}
+resultados <- datos %>%
+  mutate(
+    perdida_cop_bosque = Bosque_perdido_2022_2024 * valor_ha_cop_bosque,
+    perdida_cop_acuatico = Ecosistema_acuático_perdido_2022_2024 * valor_ha_cop_acuatico,
+    perdida_total_cop = perdida_cop_bosque + perdida_cop_acuatico
+  )
+```
+
+## 4. Calcular pérdidas económicas acumuladas por departamento (valor presente)
+
+```{r descuento, include=FALSE}
+# Tasa de descuento
+tasa_descuento <- 0.03
+
+# Año base (Valor Presente a 2024)
+anio_vp <- 2024
+
+# Año medio de cada periodo
+anios_medios <- c(2004.5, 2009.5, 2013, 2015, 2017, 2019, 2021, 2023)
+
+# Nombres de columnas
+cols_bosque <- c(
+  "Bosque_perdido_2002_2007",
+  "Bosque_perdido_2007_2012",
+  "Bosque_perdido_2012_2014",
+  "Bosque_perdido_2014_2016",
+  "Bosque_perdido_2016_2018",
+  "Bosque_perdido_2018_2020",
+  "Bosque_perdido_2020_2022",
+  "Bosque_perdido_2022_2024"
+)
+
+# Calcular VP por periodo
+vp_por_periodo <- map2_dbl(cols_bosque, anios_medios, ~{
+  n <- anio_vp - .y
+  valor_ha_cop_bosque / ((1 + tasa_descuento)^n)
+})
+
+# Aplicar por fila y sumar
+datos <- datos %>%
+  rowwise() %>%
+  mutate(valor_total_cop_bosque_VP = sum(c_across(all_of(cols_bosque)) * vp_por_periodo)) %>%
+  ungroup()
+```
+
+## 5. Calcular porcentaje de pérdida sobre PIB
+
+```{r}
+resultados <- resultados %>%
+  mutate(
+    perdida_total_cop_mil_millones = perdida_total_cop / 1e9,
+    porcentaje_pib = (perdida_total_cop / Pib_departamental) * 100
+  )
+```
+
+## 6. Resultados acumulados
+
+```{r resultado, echo=FALSE}
+datos %>%
+  select(DEPARTAMENTO = Departamento, valor_total_cop_bosque_VP) %>%
+  mutate(valor_total_cop_bosque_VP_mil_millones = valor_total_cop_bosque_VP / 1e9) %>%
+  select(DEPARTAMENTO, valor_total_cop_bosque_VP_mil_millones) %>%
+  arrange(desc(valor_total_cop_bosque_VP_mil_millones)) %>%
+  knitr::kable(digits = 2)
+```
+
+## 7. Tabla de pérdidas por departamento
+
+```{r}
+kable(resultados, digits = 2)
+```
+
+## 8. Totales para la región amazónica
+
+```{r}
+total <- resultados %>%
+  summarise(
+    Total_bosque = sum(perdida_cop_bosque, na.rm = TRUE),
+    Total_acuatico = sum(perdida_cop_acuatico, na.rm = TRUE),
+    Total_general = sum(perdida_total_cop, na.rm = TRUE)
+  ) %>%
+  mutate(across(everything(), ~ .x / 1e9))
+
+kable(total, digits = 2)
+
+resultados <- resultados %>%
+  left_join(
+    datos %>%
+      select(Departamento, valor_total_cop_bosque_VP) %>%
+      mutate(valor_total_cop_bosque_VP_mil_millones = valor_total_cop_bosque_VP / 1e9),
+    by = "Departamento"
+  )
+
+```
+
+```{r}
+# Transformar datos de pérdida por periodo a formato largo
+datos_largos <- datos %>%
+  select(Departamento, starts_with("Bosque_perdido_")) %>%
+  pivot_longer(
+    cols = starts_with("Bosque_perdido_"),
+    names_to = "Periodo",
+    values_to = "ha_perdidas"
+  ) %>%
+  mutate(
+    Periodo = str_replace(Periodo, "Bosque_perdido_", ""),
+    perdida_cop = ha_perdidas * valor_ha_cop_bosque
+  )
+```
+
+## 9. Exportar resultados a Excel para Power BI
+
+```{r}
+# Crear una lista de hojas para exportar en un solo archivo Excel
+write_xlsx(
+  list(
+    "Resultados_totales" = resultados,
+    "Serie_larga" = datos_largos
+  ),
+  "resultados_perdidas_amazonia.xlsx"
+)
+```
